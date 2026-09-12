@@ -98,12 +98,13 @@ def gradient(X_design, y, beta):
     # │ Work this out once and the rest of the course is easier: every model that
     # │ "learns" is doing exactly this with a different L.
     # └──────────────────────────────────────────────────────────────────────────
-    # YOUR CODE HERE — the MSE gradient
-    # Delete the raise below once you have written it.
-    raise NotImplementedError(
-        "Homework: write the MSE gradient. "
-        "See the YOUR TASK box just above for the steps."
-    )
+
+    n = len(y)
+    residual = y - predict(X_design, beta)
+    # dL/dbeta
+    grad = -(2.0 / n) * (X_design.T @ residual)
+
+    return grad
 
 
 def normal_equation(X_design, y):
@@ -141,15 +142,24 @@ def fit_gradient_descent(X_design, y, lr=LEARNING_RATE, n_iter=N_ITERATIONS):
     # │   - update ALL coefficients at once; do not loop over them one at a time
     # │   - subtract the gradient, do not add it (you are minimising)
     # └──────────────────────────────────────────────────────────────────────────
-    # YOUR CODE HERE — the gradient descent loop
-    # Delete the raise below once you have written it.
-    raise NotImplementedError(
-        "Homework: write the gradient descent loop. "
-        "See the YOUR TASK box just above for the steps."
-    )
+
+    beta = np.zeros(X_design.shape[1])
+    history = []
+
+    for _ in range(n_iter):
+        # 1. Compute current predictions
+        y_pred = predict(X_design, beta)
+        
+        # 2. Record the loss, appending to history
+        history.append(mse(y, y_pred))
+        
+        # 3. Compute the gradient
+        grad = gradient(X_design, y, beta)
+        
+        # 4. Step downhill (subtract the gradient)
+        beta = beta - lr * grad
 
     return beta, history
-
 
 # ---------------------------------------------------------------------------
 # 4. Reporting
