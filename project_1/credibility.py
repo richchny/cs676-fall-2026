@@ -48,12 +48,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
+import math #added richchny
+import requests #added richchny
+
 # The model used for the Layer 2 judgment. Claude Opus 5 is the most capable
 # model; switch to "claude-haiku-4-5" if you are scoring many URLs and want to
 # cut cost, or "claude-sonnet-5" for a middle option. Scoring quality will move
 # with this choice, so note in your report which model your numbers came from.
 #JUDGE_MODEL = "claude-opus-5"
-JUDGE_MODEL = "claude-haiku-4-5"
+JUDGE_MODEL = "claude-haiku-4-5" #does not support 
 
 # How much each layer contributes to the final score. These two must sum to 1.0.
 # Tuning this split is one of the easiest wins available to you.
@@ -102,6 +105,12 @@ DOMAIN_SCORES: Dict[str, float] = {
     "theonion.com": 0.05,
     "clickhole.com": 0.05,
     "babylonbee.com": 0.05,
+    # Added by richchny for Project 1 as part of Task #2
+    "jamanetwork.com": 0.93,
+    "who.int": 0.88,
+    "propublica.org": 0.85,
+    "pnas.org":0.92,
+    "imf.org": 0.85
 }
 
 # Fallback when the exact domain is unknown. Coarse and easy to fool.
@@ -189,6 +198,7 @@ def rule_based_signals(url: str) -> List[Signal]:
 
     # Signal 1: exact or suffix match against our hand-written domain table.
     match = _match_known_domain(domain)
+    domain_already_known = match is not None #flag used for crossref_signal() to avoid double-counting those in domain table
     if match:
         known, score = match
         signals.append(Signal("known_domain", score, f"'{known}' is a domain we recognize"))
@@ -213,10 +223,15 @@ def rule_based_signals(url: str) -> List[Signal]:
         if fragment in path:
             signals.append(Signal("path", delta, f"URL path contains '{fragment}'"))
 
-    # Signal 5: a DOI in the path implies a registered scholarly work.
-    if re.search(r"/10\.\d{4,9}/", path):
-        signals.append(Signal("doi", 0.10, "URL contains a DOI, suggesting a registered publication"))
+    # # Signal 5: a DOI in the path implies a registered scholarly work. # NO LONGER NEEDED with CROSSREF
+    # if re.search(r"/10\.\d{4,9}/", path):
+    #     signals.append(Signal("doi", 0.10, "URL contains a DOI, suggesting a registered publication"))
 
+    # Signal 6: real Crossref metadata (peer-review status, citations, retraction).
+    crossref = crossref_signal(url, domain_already_known=domain_already_known)
+    if crossref is not None:
+        signals.append(crossref)
+    
     return signals
 
 
@@ -297,14 +312,16 @@ def llm_opinion(url: str) -> Optional[Signal]:
 
     try:
         import anthropic
-
+        #print("anthropic imported OK")  #added per Claude to diagnose LLM call not working
         client = anthropic.Anthropic()
+        #print("client created OK") #added per Claude to diagnose LLM call not working
         response = client.messages.create(
             model=JUDGE_MODEL,
             max_tokens=1024,
             system=_JUDGE_SYSTEM,
             messages=[{"role": "user", "content": f"Rate the credibility of this source: {url}"}],
-            output_config={"effort": "low", "format": {"type": "json_schema", "schema": _JUDGE_SCHEMA}},
+            #output_config={"effort": "low", "format": {"type": "json_schema", "schema": _JUDGE_SCHEMA}}, #effort NOT SUPPORTED BY HAIKU 4.5
+            output_config={"format": {"type": "json_schema", "schema": _JUDGE_SCHEMA}},
         )
 
         # Claude can decline a request; content is empty or partial when it does.
@@ -316,10 +333,97 @@ def llm_opinion(url: str) -> Optional[Signal]:
         score = max(0.0, min(1.0, float(data["score"])))
         return Signal("llm", score, str(data["reason"]))
 
-    except Exception:
+
+    except Exception as e:
         # Any failure falls back to rules-only scoring rather than crashing.
+        # print(f"LLM ERROR: {e}") #added per Claude to diagnose LLM call not working
         return None
 
+# =============================================================================
+# LAYER 1 ADDITION — CROSSREF METADATA
+# =============================================================================
+# Addresses KNOWN WEAKNESSES #3 (preprint vs. peer-reviewed) and #4 (retraction
+# status). Crossref is a free, keyless registry for scholarly DOIs. Unlike
+# llm_opinion(), this needs no API key and costs nothing — it is a real Layer 1
+# signal, not a Layer 2 judgment call.
+#
+# IMPORTANT: this only fires when a DOI is present in the URL. Many real,
+# credible URLs (a Reuters article, a .gov page) have no DOI at all, so this
+# signal is silent for most of the evaluation set — it specifically targets
+# academic sources, where it is a strong, verifiable signal.
+
+
+def _extract_doi(url: str) -> Optional[str]:
+    """
+    Pull a full DOI out of a URL, e.g.
+    https://www.nejm.org/doi/full/10.1056/NEJMoa2034577 -> "10.1056/NEJMoa2034577"
+    Returns None if no DOI-shaped substring is found.
+    """
+    match = re.search(r"(10\.\d{4,9}/[^\s/?#]+)", url)
+    return match.group(1) if match else None
+
+
+def crossref_signal(url: str, domain_already_known: bool = False) -> Optional[Signal]:
+    """
+    Query Crossref for real publication metadata, using the DOI embedded in
+    the URL. Returns None whenever no signal can be produced.
+
+    :param domain_already_known: True when the domain already has a hand-picked
+        score in DOMAIN_SCORES. In that case we skip re-crediting peer-review
+        status (already priced into that score) to avoid double-counting, but
+        we still apply retraction and citation signals, since neither of those
+        is captured by a static domain score.
+    """
+    doi = _extract_doi(url)
+    if not doi:
+        return None
+
+    try:
+        response = requests.get(f"https://api.crossref.org/works/{doi}", timeout=5)
+        if response.status_code != 200:
+            return None
+        data = response.json()["message"]
+    except Exception:
+        return None
+
+    # Retraction check first: this should dominate any other signal, and
+    # applies regardless of whether the domain is already known.
+    update_notices = data.get("update-to") or []
+    is_retracted = any(
+        (u.get("type") or "").lower() == "retraction" for u in update_notices
+    )
+    if is_retracted:
+        return Signal(
+            "crossref_retraction",
+            -0.90,
+            "Crossref indicates this work has been retracted",
+        )
+
+    # Peer-reviewed article vs. preprint/other content. Skipped for domains
+    # we already have a hand-picked score for, to avoid double-counting the
+    # same "this venue is reputable" judgment twice.
+    work_type = data.get("type", "unknown")
+    if domain_already_known:
+        type_adjustment = 0.0
+        type_note = f"registered as '{work_type}' per Crossref"
+    elif work_type == "journal-article":
+        type_adjustment = 0.15
+        type_note = "a peer-reviewed journal article per Crossref"
+    elif work_type in ("posted-content", "preprint"):
+        type_adjustment = -0.10
+        type_note = "a preprint, not yet peer reviewed, per Crossref"
+    else:
+        type_adjustment = 0.0
+        type_note = f"registered as '{work_type}' per Crossref"
+
+    # Citation count, log-scaled, capped low so it cannot override the type
+    # penalty above for an unknown domain.
+    citations = data.get("is-referenced-by-count", 0) or 0
+    citation_adjustment = min(0.05, math.log10(citations + 1) * 0.01)
+
+    total = type_adjustment + citation_adjustment
+    reason = f"{type_note}, cited {citations} times"
+    return Signal("crossref", total, reason)
 
 # =============================================================================
 # THE FUNCTION YOU ARE GRADED ON
