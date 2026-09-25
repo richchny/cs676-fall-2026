@@ -113,10 +113,13 @@ DOMAIN_SCORES: Dict[str, float] = {
     "theonion.com": 0.05,
     "clickhole.com": 0.05,
     "babylonbee.com": 0.05,
-    # Added by richchny for Project 1 as part of Task #2
+
+# Initial naive domain list expansion, later realize was explicitly recommended against
+# Later adjusted with known reliable domains found on Wikipedia's RSP (Reliable Sources / Perennial Sources)
+# list and assigned high score 0.90 if found, removed otherwise.
     "jamanetwork.com": 0.90, #on wikipedia list as generally reliable, assigned high score
-    #"who.int": 0.88, #not on wikipedia list
     "propublica.org": 0.90, #on wikipedia list as generally reliable, assigned high score
+    #"who.int": 0.88, #not on wikipedia list
     #"pnas.org":0.92, #not on wikipedia list
     #"imf.org": 0.85 #not on wikipedia list
 }
