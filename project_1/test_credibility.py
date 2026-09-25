@@ -76,6 +76,33 @@ check(score_band(0.9)[0] == "HIGH", "0.90 -> HIGH")
 check(score_band(0.5)[0] == "MEDIUM", "0.50 -> MEDIUM")
 check(score_band(0.1)[0] == "LOW", "0.10 -> LOW")
 
+#Fake DOI test — verifies DOI that doesn't resolve via Crossref is still handleed gracefully
+print("\nContract: Crossref signal degrades gracefully")
+try:
+    fake_doi_result = score_url("https://example.com/10.9999/totally-fake-doi", use_llm=False)
+    ok = isinstance(fake_doi_result, dict) and 0.0 <= fake_doi_result["score"] <= 1.0
+    check(ok, f"a DOI-shaped path that doesn't resolve -> {fake_doi_result['score']:.2f} (no exception)")
+except Exception as e:
+    check(False, f"fake DOI raised {type(e).__name__}")
+
+#Journal vs. preprint — tests that Crossref's type signal (weakness #3) actually does something, not just that it doesn't crash.
+print("\nSanity: Crossref-verified peer review outranks an unverified preprint")
+journal_article = score_url("https://www.nejm.org/doi/full/10.1056/NEJMoa2034577", use_llm=False)["score"]
+preprint = score_url("https://www.biorxiv.org/content/10.1101/2020.01.01.000001v1", use_llm=False)["score"]
+check(
+    journal_article > preprint,
+    f"a peer-reviewed article ({journal_article:.2f}) outranks a preprint ({preprint:.2f})",
+)
+
+#JAMA vs. sponsored - verify JAMA is ranked sensibily (on Wikipedia Perennial Sources List)
+print("\nSanity: domain table corrections (Wikipedia RSP-backed) still rank sensibly")
+jama = score_url("https://jamanetwork.com/journals/jama/fullarticle/example", use_llm=False)["score"]
+sponsored = score_url("https://example.com/sponsored/miracle-supplement", use_llm=False)["score"]
+check(
+    jama > sponsored,
+    f"a peer-reviewed medical journal ({jama:.2f}) outranks sponsored content ({sponsored:.2f})",
+)
+
 print(f"\n{'=' * 60}")
 print(f"  {PASSED} passed, {FAILED} failed")
 print(f"{'=' * 60}\n")
