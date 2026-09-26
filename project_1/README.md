@@ -55,7 +55,9 @@ Those two explanations are, frankly, not good enough. That is the point.
 | File | What it is | Do you edit it? |
 |---|---|---|
 | **`credibility.py`** | **The scorer. Your work goes here.** | **Yes — this is the assignment** |
-| `main.py` | Streamlit chat app; calls Claude, renders sources with coloured chips | Rarely |
+| `main.py` | **Streamlit** front end; renders sources with coloured chips | Rarely |
+| `app.py` | **Gradio** front end — the same app, and what a Hugging Face Space runs | Rarely |
+| `chat_backend.py` | Shared by both front ends: the Claude call, web search, citation extraction | Rarely |
 | `evaluate.py` | Scores 24 labelled URLs and reports your error | Extend the label set |
 | `test_credibility.py` | Contract tests — checks the output *shape*, not quality | Add your own cases |
 | `.env.example` | Template for API keys | Copy to `.env` |
@@ -269,14 +271,22 @@ is the worst single miss at 0.410, scored 0.52 purely because `jamanetwork.com` 
 If either command fails before printing anything, your environment is the problem, not
 your code — see [Troubleshooting](#troubleshooting).
 
-**Then start the app:**
+**Then start the app.** There are two front ends over the same backend — pick either:
 
 ```bash
-uv run streamlit run main.py
+uv run streamlit run main.py     # Streamlit, http://localhost:8501
+uv run python app.py             # Gradio,    http://localhost:7860
 ```
 
-It opens at `http://localhost:8501`. The sidebar shows which keys it found and lets
-you score any URL directly — useful for testing without burning chat tokens.
+Both show which keys they found and let you score any URL directly, which is useful
+for testing without burning chat tokens. They behave the same because the model call,
+the web search, and the citation extraction all live in `chat_backend.py` — only the
+UI differs.
+
+**Use Streamlit for local work and Gradio for deployment.** The Hugging Face bonus
+needs the Gradio one; see [the bonus section](#bonus-deploy-to-hugging-face-5) for why.
+If you improve `credibility.py` — which is the assignment — both front ends pick the
+change up with no extra work, because both call `score_url` the same way.
 
 ---
 
@@ -410,16 +420,36 @@ full marks.
 Getting the app running on a public URL is worth **an extra 5% on your course grade**.
 It is genuinely more work, which is why it is worth points.
 
+**Use the Gradio SDK, and deploy `app.py`.** This needs a short explanation, because
+the obvious route is a trap:
+
+Hugging Face removed the Streamlit SDK — the picker now offers only Gradio, Docker, and
+static HTML. A Streamlit app can still run there under the **Docker** SDK, but
+**creating a Docker Space requires a PRO subscription at $9/month.** A Gradio Space does
+not. That is the entire reason `app.py` exists: it is the same app as `main.py`, over the
+same `chat_backend.py`, so the free route costs you no extra work.
+
 1. Create a **Space** at [huggingface.co/new-space](https://huggingface.co/new-space).
-   Choose the **Streamlit** SDK and the free CPU tier.
-2. Push `main.py`, `credibility.py`, and `requirements.txt` to the Space repo.
-3. Put this at the top of the Space's own `README.md` so it launches the right file:
+   Choose the **Gradio** SDK and the free **CPU basic** hardware.
+2. Push these four files to the Space repo:
+
+   ```
+   app.py               the Gradio front end (Spaces looks for this filename)
+   chat_backend.py      the Claude call and citation extraction
+   credibility.py       your scorer — the part you are graded on
+   requirements.txt     dependencies
+   ```
+
+   You do **not** need `main.py` on the Space. Leave it out and Streamlit never gets
+   installed there, which makes the build faster.
+
+3. Put this at the top of the Space's own `README.md`:
 
    ```yaml
    ---
    title: Credibility Scored Chatbot
-   sdk: streamlit
-   app_file: main.py
+   sdk: gradio
+   app_file: app.py
    pinned: false
    ---
    ```
@@ -428,6 +458,15 @@ It is genuinely more work, which is why it is worth points.
    **Never commit your key** — a key pushed to a public Space is a key you must
    immediately revoke.
 5. Submit the public Space URL alongside your other deliverables.
+
+Two things that save debugging time. `app.py` already binds `0.0.0.0:7860`, which is what
+Spaces expects — if you write your own entry point, it must do the same, or the Space
+builds cleanly and then times out with nothing useful in the log. And the app works
+without a key: the chat will tell you the key is missing and the URL scorer still runs,
+so a Space that loads but cannot answer is a secrets problem, not a code problem.
+
+If any part of this asks you to upgrade to a paid plan, stop and email me rather than
+paying. No part of this course requires a subscription.
 
 ---
 
@@ -477,10 +516,19 @@ Notepad does this silently) and sit in this directory.
 Run it through uv: `uv run streamlit run main.py`. On the venv fallback, activate the
 environment or run it as a module: `python -m streamlit run main.py`.
 
-**Everything is slow**
+**Everything is slow, or costs more than I expected**
 Each chat turn makes a Claude call plus one scoring call per source. Turn off the
 SerpAPI checkbox, or set `JUDGE_MODEL = "claude-haiku-4-5"` in `credibility.py` while
-developing. Say which model produced your submitted numbers.
+developing — Haiku is roughly a fifth the price of the default. It scores a little
+worse (MAE 0.102 and 75.0% band accuracy, against 0.086 and 83.3% on the default
+Claude Opus 5), which is a fine trade while you are iterating. **Say which model
+produced your submitted numbers.**
+
+Earlier versions of `credibility.py` broke when you switched to Haiku: it rejects a
+parameter the scorer was sending unconditionally, and the resulting error was
+swallowed, so the LLM layer silently did nothing and your numbers stayed at the
+rules-only baseline. That is fixed — the scorer now notices and retries. If you are
+on an older clone, `git pull`.
 
 **I want to work without spending API credits**
 You can do most of the assignment that way. `uv run python evaluate.py` and
