@@ -66,13 +66,25 @@ class SimpleDecisionTreeClassifier:
         # └──────────────────────────────────────────────────────────────────────
         
         for idx in range(n_features):
-            
+            #print(f"IDX is {idx}") #for learning
+            for threshold in np.unique(X[:, idx]):
+                left_indices = X[:, idx] <= threshold
+                right_indices = X[:, idx] > threshold
 
+                n_left = left_indices.sum()
+                n_right = right_indices.sum()
+                if n_left == 0 or n_right == 0:
+                    continue
 
-        #raise NotImplementedError(
-        #    "Homework: write the exhaustive split search. "
-        #    "See the YOUR TASK box just above for the steps."
-        #)
+                left = y[left_indices]
+                right = y[right_indices]
+                weighted_gini = (n_left * self.gini(left) + n_right * self.gini(right)) / n_samples
+                #print(f"Threshold {threshold}, weighted_gini {weighted_gini}") #for learning
+
+                if weighted_gini < best_gini:
+                    best_gini = weighted_gini
+                    best_idx = idx
+                    best_threshold = threshold
 
         return best_idx, best_threshold
 
