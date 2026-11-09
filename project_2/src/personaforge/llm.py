@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Optional, Protocol
 # Claude Opus 5 is the most capable model. While you are iterating you may want
 # "claude-haiku-4-5" — a persona conversation makes one call per turn, and those
 # add up. Say which model produced your submitted transcripts.
-DEFAULT_MODEL = "claude-opus-5"
+#DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-haiku-4-5"
 
 
 class LLM(Protocol):

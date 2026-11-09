@@ -111,12 +111,16 @@ class PersonaSpec:
 
         return cls(name=meta["name"], role=meta["role"], summary=meta["summary"], body=body.strip())
 
-
-def save_persona(spec: PersonaSpec, directory: Path = DEFAULT_PERSONA_DIR) -> Path:
-    """Write the persona to `<directory>/<slug>.md`, creating the folder if needed."""
+def save_persona(spec: PersonaSpec, directory: Path = DEFAULT_PERSONA_DIR, overwrite: bool = False) -> Path:
+    """Write the persona to `<directory>/<slug>.md`, never clobbering an existing file by default."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{spec.slug()}.md"
+    if not overwrite: #first test with LIVE main.py create two personas "Marcus Chen" which overwrote each other, add check and append number if name.md exists
+        n = 2
+        while path.exists():
+            path = directory / f"{spec.slug()}-{n}.md"
+            n += 1
     path.write_text(spec.to_markdown(), encoding="utf-8")
     return path
 
@@ -188,18 +192,38 @@ One or two sentences on what they will not say or do.
 Write a specific individual, not a type. Give them a quirk. Avoid stereotypes,
 and do not make them a spokesperson for a demographic."""
 
+#modified so model does not generate personas with the same name
 
-def generate_persona(description: str, llm: LLM) -> PersonaSpec:
+def _unique_name(name: str, taken: List[str]) -> str:
+    """Return `name`, or `name 2`, `name 3`... if it collides (case-insensitively) with a taken name."""
+    taken_lower = {t.lower() for t in taken}
+    if name.lower() not in taken_lower:
+        return name
+
+    n = 2
+    while f"{name} {n}".lower() in taken_lower:
+        n += 1
+    return f"{name} {n}"
+
+def generate_persona(description: str, llm: LLM, existing_names: Optional[List[str]] = None) -> PersonaSpec:
     """
     Ask the model to author a persona from a one-line description.
 
-    :param description: e.g. "a patient with type 2 diabetes who distrusts doctors"
-    :param llm:         any LLM implementation (real or scripted)
-    :return:            the parsed PersonaSpec — not yet saved to disk
+    :param description:    e.g. "a patient with type 2 diabetes who distrusts doctors"
+    :param llm:            any LLM implementation (real or scripted)
+    :param existing_names: names already in use. The model is asked to avoid them,
+                           and if it picks one anyway the name is made unique.
+    :return:               the parsed PersonaSpec, not yet saved to disk
     """
+    taken = list(existing_names or [])
+
+    request = f"Write a persona for: {description}"
+    if taken:
+        request += f"\n\nThese names are already taken, so choose a different name: {', '.join(taken)}"
+
     markdown = llm.complete(
         system=_AUTHOR_SYSTEM,
-        messages=[{"role": "user", "content": f"Write a persona for: {description}"}],
+        messages=[{"role": "user", "content": request}],
         max_tokens=2048,
     )
 
@@ -210,6 +234,9 @@ def generate_persona(description: str, llm: LLM) -> PersonaSpec:
     if spec.name == "Unnamed":
         spec.name = description[:40].strip().title() or "Unnamed"
         spec.summary = description.strip()
+
+    # Safety net: the prompt is a request, not a guarantee.
+    spec.name = _unique_name(spec.name, taken)
 
     return spec
 
