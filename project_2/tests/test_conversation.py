@@ -13,8 +13,11 @@ from personaforge import (
     run_conversation,
     save_persona,
     save_transcript,
+    list_personas,
 )
 from personaforge.llm import ScriptedLLM
+from personaforge.llm import ScriptedToolLLM, ToolCall, ToolResponse
+from personaforge.tools import execute_tool
 
 PERSONA_MD = """---
 name: {name}
@@ -129,7 +132,7 @@ def test_conversation_runs_with_two_personas(tmp_path):
 
     assert result.conversation is not None
     assert len(result.conversation.turns) == 6
-    assert (tmp_path / "conversation.md").exists()
+    assert list((tmp_path / "transcripts").glob("*.md"))
 
 
 def test_named_participants_are_resolved(tmp_path):
@@ -161,3 +164,144 @@ def test_unmatched_input_falls_through_to_chat(tmp_path):
 
     assert result.reply == "Tell me who you want to build."
     assert result.conversation is None
+
+
+def test_transcripts_do_not_overwrite_each_other(tmp_path):
+    a, b, _ = two_agents()
+    first = save_transcript(run_conversation([a, b], topic="first topic", turns=2), tmp_path)
+    second = save_transcript(run_conversation([a, b], topic="second topic", turns=2), tmp_path)
+
+    assert first != second
+    assert first.exists() and second.exists()
+
+
+def test_transcripts_are_not_loaded_as_personas(tmp_path):
+    save_persona(PersonaSpec(name="Alice Adams", role="doctor", summary="", body="b"), tmp_path)
+    save_persona(PersonaSpec(name="Bob Brown", role="patient", summary="", body="b"), tmp_path)
+
+    orch = Orchestrator(llm=ScriptedLLM(replies=["a line"]), persona_dir=tmp_path)
+    orch.handle("have them talk about the results")
+
+    names = [s.name for s in list_personas(tmp_path)]
+    assert "Unnamed" not in names
+    assert len(names) == 2
+
+# -- tool-use routing ---------------------------------------------------------
+
+
+def tool_turn(name, args, call_id="t1"):
+    """A scripted model reply that asks for one tool."""
+    return ToolResponse(
+        text="",
+        tool_calls=[ToolCall(id=call_id, name=name, input=args)],
+        stop_reason="tool_use",
+        raw_content=[{"type": "tool_use", "id": call_id, "name": name, "input": args}],
+    )
+
+
+def final(text):
+    return ToolResponse(text=text, stop_reason="end_turn", raw_content=[{"type": "text", "text": text}])
+
+
+def test_plain_answer_needs_no_tools(tmp_path):
+    llm = ScriptedToolLLM(responses=[final("Who should I create?")])
+    orch = Orchestrator(llm=llm, persona_dir=tmp_path)
+
+    result = orch.handle("create a persona")
+
+    assert result.reply == "Who should I create?"
+
+
+def test_tool_call_is_executed_and_result_returned_to_model(tmp_path):
+    # execute_tool will call the same fake model, so give it a persona to author.
+    llm = ScriptedToolLLM(
+        responses=[tool_turn("list_personas", {}), final("There are none yet.")]
+    )
+    orch = Orchestrator(llm=llm, persona_dir=tmp_path)
+
+    result = orch.handle("who do I have?")
+
+    assert result.reply == "There are none yet."
+    # The second request must carry a tool_result quoting the call's id.
+    last_message = llm.calls[1]["messages"][-1]
+    assert last_message["role"] == "user"
+    assert last_message["content"][0]["tool_use_id"] == "t1"
+    assert "no personas" in last_message["content"][0]["content"]
+
+
+def test_tool_errors_go_back_to_the_model(tmp_path):
+    llm = ScriptedToolLLM(
+        responses=[
+            tool_turn("start_conversation", {"participants": ["Zaphod", "Bob"], "topic": "x"}),
+            final("I couldn't find Zaphod."),
+        ]
+    )
+    orch = Orchestrator(llm=llm, persona_dir=tmp_path)
+
+    orch.handle("have Zaphod talk to Bob")
+
+    fed_back = llm.calls[1]["messages"][-1]["content"][0]["content"]
+    assert fed_back.startswith("Error")
+
+
+def test_runaway_tool_loop_is_stopped(tmp_path):
+    from personaforge.orchestrator import MAX_TOOL_ROUNDS
+
+    llm = ScriptedToolLLM(responses=[tool_turn("list_personas", {}, f"t{i}") for i in range(MAX_TOOL_ROUNDS)])
+    orch = Orchestrator(llm=llm, persona_dir=tmp_path)
+
+    result = orch.handle("loop forever")
+
+    assert "stuck" in result.reply
+
+
+# -- failure handling ---------------------------------------------------------
+
+
+class FailingLLM:
+    """A fake model that answers `ok_calls` times and then raises, like an API outage."""
+
+    def __init__(self, ok_calls):
+        self.ok_calls = ok_calls
+        self.n = 0
+
+    def complete(self, system, messages, max_tokens=2048):
+        self.n += 1
+        if self.n > self.ok_calls:
+            raise RuntimeError("API down")
+        return "a line"
+
+
+def test_failed_turn_keeps_earlier_lines_and_records_why():
+    llm = FailingLLM(ok_calls=2)
+    a = agent_from_spec(PersonaSpec(name="Alice", role="doctor", summary="", body="A"), llm)
+    b = agent_from_spec(PersonaSpec(name="Bob", role="patient", summary="", body="B"), llm)
+
+    convo = run_conversation([a, b], topic="x", turns=4)
+
+    assert len(convo.turns) == 2
+    assert "API down" in convo.error
+    assert "Stopped early" in convo.transcript()
+
+
+def test_empty_reply_stops_the_conversation():
+    a, b, _ = two_agents(replies=["hello", ""])
+    convo = run_conversation([a, b], topic="x", turns=4)
+
+    assert len(convo.turns) == 1
+    assert "empty reply" in convo.error
+
+
+def test_conversation_tool_saves_a_partial_transcript(tmp_path):
+    for name, role in [("Alice Adams", "doctor"), ("Bob Brown", "patient")]:
+        save_persona(PersonaSpec(name=name, role=role, summary="", body="b"), tmp_path)
+
+    result = execute_tool(
+        "start_conversation",
+        {"participants": ["Alice Adams", "Bob Brown"], "topic": "x", "turns": 4},
+        FailingLLM(ok_calls=1),
+        tmp_path,
+    )
+
+    assert "stopped early after 1 of 4 turns" in result
+    assert list((tmp_path / "transcripts").glob("*.md"))

@@ -14,6 +14,9 @@ from typing import Callable, List, Optional
 
 from .agent import PersonaAgent
 
+import re
+from datetime import datetime
+from pathlib import Path
 
 @dataclass
 class Turn:
@@ -30,11 +33,16 @@ class Conversation:
     topic: str
     participants: List[str]
     turns: List[Turn] = field(default_factory=list)
+    error: Optional[str] = None  # set if the conversation stopped early
 
     def transcript(self) -> str:
         """Render as plain text, suitable for saving or printing."""
         header = f"# Conversation: {self.topic}\n\nParticipants: {', '.join(self.participants)}\n\n"
-        return header + "\n\n".join(f"**{t.speaker}:** {t.text}" for t in self.turns)
+        text = header + "\n\n".join(f"**{t.speaker}:** {t.text}" for t in self.turns)
+        if self.error:
+            text += f"\n\n*[Stopped early after {len(self.turns)} turns: {self.error}]*"
+        return text
+    
 
 
 def run_conversation(
@@ -59,11 +67,23 @@ def run_conversation(
 
     # The topic is injected as a scene-setting turn from a narrator. Every agent
     # sees it as context but nobody has to answer it directly.
-    history: List[Turn] = [Turn(speaker="Scene", text=topic)]
+    #modified so the scene is framed as instructions instead of a bare topic
+    history: List[Turn] = [Turn(speaker="Scene", text=f"You are in a conversation. The subject is: {topic}. Begin speaking in character now; do not ask for clarification or describe the setup.")]
 
+    #modified so a faililing turn does not lose the whole conversation
     for i in range(turns):
         speaker = agents[i % len(agents)]
-        text = speaker.respond(history)
+
+        try:
+            text = speaker.respond(history)
+            # An empty reply is a failure too: it was the symptom of the
+            # duplicate-name bug, and recording blank turns helps nobody.
+            if not text.strip():
+                raise ValueError("the model returned an empty reply")
+        except Exception as exc:  # noqa: BLE001 - keep what was said, report why we stopped
+            conversation.error = f"{speaker.name} failed on turn {i + 1} ({type(exc).__name__}: {exc})"
+            break
+
         turn = Turn(speaker=speaker.name, text=text)
 
         history.append(turn)
@@ -74,15 +94,24 @@ def run_conversation(
 
     return conversation
 
+#moved transcript to a new folder so the conversation.md is not read as a persona
+def save_transcript(conversation: Conversation, directory, filename: Optional[str] = None) -> Path:
+    """
+    Write the transcript to disk and return its path.
 
-def save_transcript(conversation: Conversation, directory, filename: Optional[str] = None):
-    """Write the transcript to disk next to the personas that produced it."""
-    from pathlib import Path
-
+    With no filename, one is generated from the time and topic, e.g.
+    `2026-11-08_223045_the-mri-results.md`, so a new conversation never
+    overwrites an earlier one. An explicit filename is used as given.
+    """
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    name = filename or "conversation.md"
-    path = directory / name
+
+    if filename is None:
+        stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        topic_slug = re.sub(r"[^a-z0-9]+", "-", conversation.topic.lower()).strip("-")[:40] or "conversation"
+        filename = f"{stamp}_{topic_slug}.md"
+
+    path = directory / filename
     path.write_text(conversation.transcript(), encoding="utf-8")
     return path
 

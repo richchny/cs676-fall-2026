@@ -25,6 +25,23 @@ from typing import Any, Dict, List, Optional, Protocol
 #DEFAULT_MODEL = "claude-opus-5"
 DEFAULT_MODEL = "claude-haiku-4-5"
 
+@dataclass
+class ToolCall:
+    """One request from the model to run a tool."""
+
+    id: str      # the model's label for this call; our result must quote it back
+    name: str    # which tool, e.g. "create_persona"
+    input: Dict[str, Any]  # the arguments, e.g. {"description": "a doctor"}
+
+
+@dataclass
+class ToolResponse:
+    """What the model said when it was given tools."""
+
+    text: str                                  # any plain text it wrote
+    tool_calls: List[ToolCall] = field(default_factory=list)  # tools it wants run
+    stop_reason: str = "end_turn"              # "tool_use" means: run the tools and reply
+    raw_content: List[Any] = field(default_factory=list)      # original blocks, needed to continue the conversation
 
 class LLM(Protocol):
     """Anything that can turn a system prompt plus a transcript into a reply."""
@@ -93,6 +110,34 @@ class ClaudeLLM:
 
         return "".join(block.text for block in response.content if block.type == "text").strip()
 
+    def complete_with_tools(
+        self,
+        system: str,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        max_tokens: int = 2048,
+    ) -> ToolResponse:
+        """Like complete(), but lets the model call tools. Returns structured blocks."""
+        response = self._get_client().messages.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+            tools=tools,
+        )
+
+        text_parts = [b.text for b in response.content if b.type == "text"]
+        calls = [
+            ToolCall(id=b.id, name=b.name, input=dict(b.input))
+            for b in response.content
+            if b.type == "tool_use"
+        ]
+        return ToolResponse(
+            text="".join(text_parts).strip(),
+            tool_calls=calls,
+            stop_reason=response.stop_reason,
+            raw_content=list(response.content),
+        )
 
 @dataclass
 class ScriptedLLM:
@@ -111,6 +156,21 @@ class ScriptedLLM:
         self.calls.append({"system": system, "messages": list(messages)})
         return self.replies[(len(self.calls) - 1) % len(self.replies)]
 
+@dataclass
+class ScriptedToolLLM:
+    """
+    A fake model for testing tool use. Replays a fixed list of ToolResponses.
+
+    Each call to complete_with_tools() returns the next response in order, so a
+    test can script "first ask for create_persona, then say 'done'".
+    """
+
+    responses: List[ToolResponse] = field(default_factory=list)
+    calls: List[Dict[str, Any]] = field(default_factory=list)
+
+    def complete_with_tools(self, system, messages, tools, max_tokens: int = 2048) -> ToolResponse:
+        self.calls.append({"system": system, "messages": list(messages), "tools": tools})
+        return self.responses[len(self.calls) - 1]
 
 _DEMO_DIALOGUE = [
     "I understand. Could you tell me more about when the symptoms started?",

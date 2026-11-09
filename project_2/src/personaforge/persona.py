@@ -154,6 +154,22 @@ def find_persona(name: str, directory: Path = DEFAULT_PERSONA_DIR) -> Optional[P
             return spec
     return None
 
+def find_personas(name: str, directory: Path = DEFAULT_PERSONA_DIR) -> List[PersonaSpec]:
+    """
+    Every persona matching `name`, by the same rules as find_persona.
+
+    An exact match on name, slug, or role wins outright. Otherwise all
+    substring matches are returned, so the caller can report an ambiguity
+    instead of silently picking the first one.
+    """
+    needle = name.strip().lower()
+    specs = list_personas(directory)
+
+    exact = [s for s in specs if needle in (s.name.lower(), s.slug(), s.role.lower())]
+    if exact:
+        return exact
+
+    return [s for s in specs if needle in s.name.lower() or needle in s.role.lower()]
 
 # -----------------------------------------------------------------------------
 # Generating a persona with the model
@@ -167,7 +183,7 @@ markdown — no preamble, no code fences.
 Use exactly this structure:
 
 ---
-name: <a specific, realistic full name>
+name: <the name given in the description if there is one, otherwise a specific, realistic full name>
 role: <one lowercase word, e.g. patient, doctor, teacher, customer>
 summary: <one line, under 15 words>
 ---
@@ -190,7 +206,10 @@ One or two sentences on their goal in a conversation.
 One or two sentences on what they will not say or do.
 
 Write a specific individual, not a type. Give them a quirk. Avoid stereotypes,
-and do not make them a spokesperson for a demographic."""
+and do not make them a spokesperson for a demographic.
+
+If the description gives a name (for example "named Elena"), use exactly that
+name. Add a surname only if none was given. Never replace a given name."""
 
 #modified so model does not generate personas with the same name
 

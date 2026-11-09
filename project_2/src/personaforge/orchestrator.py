@@ -35,6 +35,8 @@ from .persona import (
     save_persona,
 )
 
+from .tools import TOOLS, execute_tool
+
 _STAGE_MANAGER_SYSTEM = """You are the stage manager of a persona simulation workshop.
 
 The user builds fictional characters and has them talk to each other. You help them
@@ -43,6 +45,20 @@ decide who to create and what those characters should discuss.
 Be brief — two or three sentences. When the user seems ready to act, remind them they
 can say things like "create a persona doctor", "list personas", or "have them talk
 about the test results"."""
+
+_TOOL_SYSTEM = """You are the stage manager of a persona simulation workshop.
+
+The user builds fictional characters and has them talk to each other. You have tools
+to create personas, list them, and start conversations between them. Use them to do
+what the user asks, in as many steps as it takes: if they want a conversation between
+people who do not exist yet, create those people first.
+
+If the request is unclear (for example, a conversation without a topic, or a name that
+matches several personas), ask a short question instead of guessing. After using tools,
+tell the user briefly what happened. Do not repeat dialogue that the user has already
+seen printed."""
+
+MAX_TOOL_ROUNDS = 8  # safety stop so a confused model can't loop forever
 
 
 @dataclass
@@ -61,6 +77,7 @@ class Orchestrator:
         self.llm = llm
         self.persona_dir = Path(persona_dir)
         self.history: List[dict] = []
+        self.tool_history: List[dict] = []
 
     # -- intents ------------------------------------------------------------
 
@@ -69,7 +86,9 @@ class Orchestrator:
         if not description.strip():
             return Result(reply="Tell me what kind of persona — for example, 'create a persona doctor'.")
 
-        spec = generate_persona(description, self.llm)
+        existing = [s.name for s in list_personas(self.persona_dir)]
+        spec = generate_persona(description, self.llm, existing_names=existing)
+        
         path = save_persona(spec, self.persona_dir)
         return Result(
             reply=f"Created **{spec.name}** ({spec.role}) — {spec.summary}",
@@ -112,13 +131,13 @@ class Orchestrator:
         if on_start is not None:
             on_start(topic)
         conversation = run_conversation(agents, topic=topic, turns=turns, on_turn=on_turn)
-        path = save_transcript(conversation, self.persona_dir, filename="conversation.md")
+        path = save_transcript(conversation, self.persona_dir / "transcripts")
 
-        return Result(
-            reply=f"{len(conversation.turns)} turns between {' and '.join(s.name for s in specs)}.",
-            events=[f"wrote {path}"],
-            conversation=conversation,
-        )
+        reply = f"{len(conversation.turns)} turns between {' and '.join(s.name for s in specs)}."
+        if conversation.error:
+            reply = f"Stopped early after {len(conversation.turns)} turns: {conversation.error}"
+
+        return Result(reply=reply, events=[f"wrote {path}"], conversation=conversation)
 
     def _chat(self, text: str) -> Result:
         """Nothing matched, so just talk to the user."""
@@ -129,6 +148,36 @@ class Orchestrator:
 
     # -- routing ------------------------------------------------------------
 
+    def _handle_with_tools(
+        self,
+        text: str,
+        on_turn: Optional[Callable[[Turn], None]] = None,
+        on_start: Optional[Callable[[str], None]] = None,
+    ) -> Result:
+        """Let the model decide which tools to run, looping until it has a final answer."""
+        self.tool_history.append({"role": "user", "content": text})
+        events: List[str] = []
+
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = self.llm.complete_with_tools(_TOOL_SYSTEM, self.tool_history, TOOLS, max_tokens=1024)
+
+            # Echo the model's reply into the history exactly as it came back.
+            self.tool_history.append({"role": "assistant", "content": response.raw_content})
+
+            if response.stop_reason != "tool_use":
+                return Result(reply=response.text or "(done)", events=events)
+
+            # Run every tool it asked for, then send all the results back together.
+            results = []
+            for call in response.tool_calls:
+                output = execute_tool(call.name, call.input, self.llm, self.persona_dir, on_turn, on_start)
+                events.append(f"{call.name}: {output.splitlines()[0][:100]}")
+                results.append({"type": "tool_result", "tool_use_id": call.id, "content": output})
+
+            self.tool_history.append({"role": "user", "content": results})
+
+        return Result(reply="I got stuck in a loop and stopped. Try rephrasing the request.", events=events)
+
     def handle(
         self,
         text: str,
@@ -138,10 +187,16 @@ class Orchestrator:
         """
         Work out what the user meant and do it.
 
+        Models with tool support uses the tool loop, and others (offline mode) falls back to regexes
+
         Patterns are tried in order and the first match wins, so the ordering
         below is load-bearing — a fact that should make you suspicious of the
         whole approach.
         """
+
+        if hasattr(self.llm, "complete_with_tools"):
+            return self._handle_with_tools(text, on_turn=on_turn, on_start=on_start)
+        
         lowered = text.strip().lower()
 
         # "create a persona doctor" / "make a persona who is a nurse"
