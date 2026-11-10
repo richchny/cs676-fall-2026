@@ -4,7 +4,7 @@ from personaforge.llm import ScriptedToolLLM, ToolCall, ToolResponse
 from personaforge import PersonaSpec, save_persona
 from personaforge.llm import ScriptedLLM
 from personaforge.tools import TOOLS, execute_tool
-
+from personaforge.observer import latest_transcript
 
 def test_scripted_tool_llm_replays_responses_in_order():
     llm = ScriptedToolLLM(
@@ -109,3 +109,41 @@ def test_conversation_tool_runs_and_caps_turns(tmp_path):
         tmp_path,
     )
     assert "20 turns" in result
+
+GOOD_VERDICT = '{"speakers": {"Alice": {"in_character": true, "stage_directions": true}}, "on_topic": true, "notes": "Alice narrates."}'
+
+
+def write_transcript(tmp_path, name="2026-11-08_100000_x.md"):
+    folder = tmp_path / "transcripts"
+    folder.mkdir(exist_ok=True)
+    (folder / name).write_text(
+        "# Conversation: x\n\nParticipants: Alice, Bob\n\n**Alice:** hello\n\n**Bob:** hi", encoding="utf-8"
+    )
+
+
+def test_evaluate_tool_reports_the_verdict(tmp_path):
+    write_transcript(tmp_path)
+    result = execute_tool("evaluate_conversation", {}, ScriptedLLM(replies=[GOOD_VERDICT]), tmp_path)
+
+    assert "Alice used stage directions" in result
+
+
+def test_evaluate_tool_with_no_transcripts(tmp_path):
+    result = execute_tool("evaluate_conversation", {}, ScriptedLLM(), tmp_path)
+    assert result.startswith("Error")
+
+
+def test_evaluate_tool_cannot_escape_the_transcripts_folder(tmp_path):
+    (tmp_path / "secret.md").write_text("secret", encoding="utf-8")
+    write_transcript(tmp_path)
+
+    result = execute_tool("evaluate_conversation", {"filename": "../secret.md"}, ScriptedLLM(), tmp_path)
+    assert result.startswith("Error")
+
+
+def test_evaluate_tool_unreadable_verdict_is_not_a_pass(tmp_path):
+    write_transcript(tmp_path)
+    result = execute_tool("evaluate_conversation", {}, ScriptedLLM(replies=["looks fine!"]), tmp_path)
+
+    assert "could not produce" in result
+    assert "no problems flagged" not in result

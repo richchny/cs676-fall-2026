@@ -19,6 +19,8 @@ from typing import List
 from .llm import LLM
 from .persona import PersonaSpec
 
+import re
+
 # Wrapped around the persona markdown to put the model in character and keep it
 # from narrating. Without the last two rules models tend to write stage
 # directions and answer for everyone in the room.
@@ -33,11 +35,19 @@ speak in this person's voice, hold their opinions, want what they want.
 
 Rules:
 - Speak only as {name}. Never speak for anyone else.
-- Reply with dialogue only. No stage directions, no asterisks, no narration.
+- Write only the words you say aloud. Never write actions or feelings in asterisks,
+  and never describe your body or surroundings ("*pauses*", "I lean back"). If you
+  need a pause, use "..." inside your speech.
 - Stay in character even if the conversation goes somewhere unexpected.
 - Keep replies to a few sentences unless the moment genuinely calls for more.
 - You are {name}. Do not mention that you are an AI or a simulation."""
 
+def _strip_stage_directions(text: str) -> str:
+    """Remove *multi-word asterisk actions*, keeping single-word *emphasis*."""
+    text = re.sub(r"\*[^*\n]*\s[^*\n]*\*", "", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)   # trailing spaces left behind
+    text = re.sub(r"\n{3,}", "\n\n", text)   # blank-line pileups
+    return text.strip()
 
 @dataclass
 class PersonaAgent:
@@ -76,7 +86,8 @@ class PersonaAgent:
         if not messages or messages[0]["role"] != "user":
             messages.insert(0, {"role": "user", "content": "(begin the conversation)"})
 
-        return self.llm.complete(self.system_prompt(), messages, max_tokens=max_tokens)
+        reply = self.llm.complete(self.system_prompt(), messages, max_tokens=max_tokens)
+        return _strip_stage_directions(reply)
 
 
 def agent_from_spec(spec: PersonaSpec, llm: LLM) -> PersonaAgent:

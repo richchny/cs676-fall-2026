@@ -9,7 +9,7 @@ agent's point of view.
 from personaforge import PersonaSpec, agent_from_spec
 from personaforge.conversation import Turn
 from personaforge.llm import ScriptedLLM
-
+from personaforge.agent import _strip_stage_directions
 
 def make_agent(replies=None):
     spec = PersonaSpec(
@@ -34,7 +34,7 @@ def test_persona_body_becomes_the_system_prompt():
 def test_system_prompt_forbids_narration():
     agent, _ = make_agent()
     prompt = agent.system_prompt().lower()
-    assert "stage directions" in prompt
+    assert "asterisks" in prompt
     assert "speak only as" in prompt
 
 
@@ -74,3 +74,16 @@ def test_own_lines_become_assistant_turns():
 def test_agent_name_comes_from_the_spec():
     agent, _ = make_agent()
     assert agent.name == "Dr. Reyes"
+
+
+def test_asterisk_actions_are_removed():
+    assert _strip_stage_directions("*pauses, jaw tightens*\n\nLook, he's scared.") == "Look, he's scared."
+
+
+def test_single_word_emphasis_survives():
+    assert _strip_stage_directions("He *understood* it.") == "He *understood* it."
+
+
+def test_respond_strips_narration():
+    agent, _ = make_agent(replies=["*sighs heavily* Take a seat."])
+    assert agent.respond([]) == "Take a seat."

@@ -23,6 +23,8 @@ from .conversation import Conversation, Turn, run_conversation, save_transcript
 from .llm import LLM
 from .persona import find_personas, generate_persona, list_personas, save_persona
 
+from .observer import judge_conversation, latest_transcript, load_transcript
+
 DEFAULT_TURNS = 6
 MAX_TURNS = 20  # each turn is a billed API call, so cap what the model can request
 
@@ -32,7 +34,7 @@ TOOLS: List[Dict[str, Any]] = [
         "description": (
             "Create a new character and save it as a persona file. Use this when the user "
             "wants a new person, e.g. 'a skeptical data scientist named Ada'. Call it once "
-            "per character."
+            "per character. Only use this for characters that do not already exist."
         ),
         "input_schema": {
             "type": "object",
@@ -73,6 +75,23 @@ TOOLS: List[Dict[str, Any]] = [
             "required": ["participants", "topic"],
         },
     },
+    {
+        "name": "evaluate_conversation",
+        "description": (
+            "Judge a finished conversation: did each character stay in character, avoid stage "
+            "directions, and stay on topic? Use this when the user asks whether a conversation "
+            "was any good. Evaluates the most recent conversation unless a filename is given."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Optional transcript filename. Omit to evaluate the most recent one.",
+                }
+            },
+        },
+    },
 ]
 
 
@@ -92,6 +111,8 @@ def execute_tool(
             return _list_personas(persona_dir)
         if name == "start_conversation":
             return _start_conversation(args, llm, persona_dir, on_turn, on_start)
+        if name == "evaluate_conversation":
+            return _evaluate_conversation(args, llm, persona_dir)
         return f"Error: there is no tool called '{name}'."
     except KeyError as exc:
         return f"Error: missing required argument {exc}."
@@ -150,3 +171,23 @@ def _start_conversation(
             f"{conversation.error}. The partial transcript was saved to {path}."
         )
     return f"The conversation finished ({len(conversation.turns)} turns) and was saved to {path}."
+
+def _evaluate_conversation(args: Dict[str, Any], llm: LLM, persona_dir: Path) -> str:
+    transcript_dir = persona_dir / "transcripts"
+
+    if args.get("filename"):
+        # Path(...).name drops any directory part, so the model can't point us outside the folder.
+        path = transcript_dir / Path(args["filename"]).name
+        if not path.exists():
+            return f"Error: no transcript named '{path.name}'."
+    else:
+        path = latest_transcript(transcript_dir)
+        if path is None:
+            return "Error: there are no saved conversations to evaluate yet."
+
+    verdict = judge_conversation(load_transcript(path), llm)
+    if not verdict.parsed:
+        return f"The judge could not produce a readable verdict for {path.name}: {verdict.notes}"
+
+    problems = "; ".join(verdict.problems()) or "no problems flagged"
+    return f"Evaluation of {path.name}: {problems}. Judge's notes: {verdict.notes}"

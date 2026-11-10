@@ -305,3 +305,11 @@ def test_conversation_tool_saves_a_partial_transcript(tmp_path):
 
     assert "stopped early after 1 of 4 turns" in result
     assert list((tmp_path / "transcripts").glob("*.md"))
+
+def test_model_is_told_which_personas_exist(tmp_path):
+    save_persona(PersonaSpec(name="Ada Chen", role="analyst", summary="skeptic", body="b"), tmp_path)
+    llm = ScriptedToolLLM(responses=[final("ok")])
+
+    Orchestrator(llm=llm, persona_dir=tmp_path).handle("have Ada talk to Elena")
+
+    assert "Ada Chen" in llm.calls[0]["system"]

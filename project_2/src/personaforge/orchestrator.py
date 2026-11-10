@@ -46,7 +46,10 @@ Be brief — two or three sentences. When the user seems ready to act, remind th
 can say things like "create a persona doctor", "list personas", or "have them talk
 about the test results"."""
 
-_TOOL_SYSTEM = """You are the stage manager of a persona simulation workshop.
+_TOOL_SYSTEM = """You have toolsto create personas, list them, start conversations between 
+them, and evaluate a finished conversation.
+
+You are the stage manager of a persona simulation workshop.
 
 The user builds fictional characters and has them talk to each other. You have tools
 to create personas, list them, and start conversations between them. Use them to do
@@ -159,7 +162,12 @@ class Orchestrator:
         events: List[str] = []
 
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self.llm.complete_with_tools(_TOOL_SYSTEM, self.tool_history, TOOLS, max_tokens=1024)
+            roster = "\n".join(
+                f"- {s.name} ({s.role}): {s.summary}" for s in list_personas(self.persona_dir)
+            ) or "(none yet)"
+            system = f"{_TOOL_SYSTEM}\n\nPersonas that exist right now:\n{roster}"
+
+            response = self.llm.complete_with_tools(system, self.tool_history, TOOLS, max_tokens=1024)
 
             # Echo the model's reply into the history exactly as it came back.
             self.tool_history.append({"role": "assistant", "content": response.raw_content})
