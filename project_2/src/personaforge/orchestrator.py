@@ -59,7 +59,10 @@ people who do not exist yet, create those people first.
 If the request is unclear (for example, a conversation without a topic, or a name that
 matches several personas), ask a short question instead of guessing. After using tools,
 tell the user briefly what happened. Do not repeat dialogue that the user has already
-seen printed."""
+seen printed.
+
+Never create a persona the user refers to by name if one with that name already exists
+in the list below; use the existing one."""
 
 MAX_TOOL_ROUNDS = 8  # safety stop so a confused model can't loop forever
 

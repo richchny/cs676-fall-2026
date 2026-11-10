@@ -1,9 +1,5 @@
 # Conversation: hospital staffing
 
-"""
-test fix for conversation breaking midway
-"""
-
 Participants: Ada Chen, Elena Vasquez
 
 **Ada Chen:** I appreciate the setup, but I need to know what's actually happening here. Are we doing rounds? Is this a meeting about scheduling? And who am I talking to? Give me some context so I can respond authentically instead of just guessing what you want.
