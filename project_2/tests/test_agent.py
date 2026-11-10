@@ -87,3 +87,7 @@ def test_single_word_emphasis_survives():
 def test_respond_strips_narration():
     agent, _ = make_agent(replies=["*sighs heavily* Take a seat."])
     assert agent.respond([]) == "Take a seat."
+
+def test_filter_does_not_eat_dialogue_between_emphasis_marks():
+    line = "Has anyone actually *asked* him what *he* believes the risks are?"
+    assert _strip_stage_directions(line) == line

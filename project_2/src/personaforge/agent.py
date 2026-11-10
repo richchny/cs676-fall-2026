@@ -44,7 +44,7 @@ Rules:
 
 def _strip_stage_directions(text: str) -> str:
     """Remove *multi-word asterisk actions*, keeping single-word *emphasis*."""
-    text = re.sub(r"\*[^*\n]*\s[^*\n]*\*", "", text)
+    text = re.sub(r"(?<![\w*])\*(?=\S)[^*\n]*\s[^*\n]*(?<=\S)\*(?![\w*])", "", text)
     text = re.sub(r"[ \t]+\n", "\n", text)   # trailing spaces left behind
     text = re.sub(r"\n{3,}", "\n\n", text)   # blank-line pileups
     return text.strip()
