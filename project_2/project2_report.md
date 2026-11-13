@@ -1,8 +1,7 @@
 # Project 2: PersonaForge
 **Author:** Richard Chen · CS676 Fall 2026 · Pace University
-**Model used for all generated personas, conversations, and judge verdicts:** `claude-haiku-4-5`
 
-# PersonaForge: Technical Report
+**Model used for all generated personas, conversations, and judge verdicts:** `claude-haiku-4-5`
 
 ---
 
@@ -269,7 +268,6 @@ A six-turn conversation after two persona creations is roughly 6 + 2 + (2 x 3) =
 - **Single-sample evidence.** Section 6 reports one to three runs per condition. A proper evaluation would run each condition many times and log raw pre-filter replies.
 - **Judge validity.** Same model family as the generator, and spot-checks found false negatives. A stronger judge model, or a second judge, would be the next experiment.
 - **Persona folder is relative to the working directory** (`temp/` by default), so launching from another folder shows an empty roster. `--persona-dir` overrides it.
-- **No public deployment** (the optional bonus) was attempted.
 
 ---
 
