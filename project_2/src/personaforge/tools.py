@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .agent import agent_from_spec
-from .conversation import Conversation, Turn, run_conversation, save_transcript
+from .conversation import Turn, run_conversation, save_transcript
 from .llm import LLM
 from .persona import find_personas, generate_persona, list_personas, save_persona
 

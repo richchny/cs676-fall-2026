@@ -13,13 +13,14 @@ between turns. That is a design decision with consequences; see YOUR TASK.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from typing import List
 
 from .llm import LLM
 from .persona import PersonaSpec
 
-import re
 
 # Wrapped around the persona markdown to put the model in character and keep it
 # from narrating. Without the last two rules models tend to write stage
@@ -110,7 +111,7 @@ def agent_from_spec(spec: PersonaSpec, llm: LLM) -> PersonaAgent:
 #     conversation. Every agent speaks every time it is asked.
 #
 #  4. Nothing stops an agent breaking character, and nothing detects it when it
-#     happens. What would a check look like?
+#     happens. What would a check look like? [HANDLED BY OBSERVER]
 #
 #  5. There is no notion of what an agent knows privately versus what has been
 #     said out loud. A doctor and a patient should not share a memory.

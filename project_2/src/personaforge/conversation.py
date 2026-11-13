@@ -12,11 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
-from .agent import PersonaAgent
-
 import re
 from datetime import datetime
 from pathlib import Path
+
+from .agent import PersonaAgent
 
 @dataclass
 class Turn:
@@ -70,7 +70,7 @@ def run_conversation(
     #modified so the scene is framed as instructions instead of a bare topic
     history: List[Turn] = [Turn(speaker="Scene", text=f"You are in a conversation. The subject is: {topic}. Begin speaking in character now; do not ask for clarification or describe the setup.")]
 
-    #modified so a faililing turn does not lose the whole conversation
+    #modified so a failing turn does not lose the whole conversation
     for i in range(turns):
         speaker = agents[i % len(agents)]
 
@@ -132,10 +132,10 @@ def save_transcript(conversation: Conversation, directory, filename: Optional[st
 #  4. Nobody observes the conversation. A third agent could summarize it, judge
 #     it, or score whether the doctor actually answered the patient's question —
 #     which is the natural bridge to the AI-judge requirement in the final
-#     presentation rubric.
+#     presentation rubric. [DONE]
 #
 #  5. `save_transcript` always writes to the same filename, so each conversation
-#     overwrites the last one.
+#     overwrites the last one. [DONE]
 #
 #  6. If one agent's reply fails, the whole conversation raises and everything
-#     said so far is lost.
+#     said so far is lost. [DONE]

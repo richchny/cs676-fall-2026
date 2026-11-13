@@ -266,10 +266,10 @@ def generate_persona(description: str, llm: LLM, existing_names: Optional[List[s
 #
 #  1. `find_persona` matches on substrings, so "doc" could match a persona named
 #     "Dorothy". Two personas with the same role are indistinguishable. Decide
-#     what the right disambiguation behaviour is and implement it.
+#     what the right disambiguation behaviour is and implement it. [PARTLY]
 #
 #  2. `save_persona` silently overwrites an existing file with the same slug.
-#     Creating two patients named Maria loses the first one.
+#     Creating two patients named Maria loses the first one. [DONE]
 #
 #  3. The frontmatter parser handles three fixed keys and no quoting. A summary
 #     containing a colon will parse in a way you will not enjoy. It does now

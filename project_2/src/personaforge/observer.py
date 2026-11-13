@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import json
 import re
+
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .conversation import Conversation, Turn
 from .llm import LLM
-
-from pathlib import Path
 
 _JUDGE_SYSTEM = """You are a strict evaluator of simulated conversations between fictional characters.
 
@@ -136,7 +136,6 @@ def judge_conversation(conversation: Conversation, llm: LLM) -> Verdict:
 
 def load_transcript(path) -> Conversation:
     """Rebuild a Conversation from a saved transcript file, so old runs can be judged."""
-    from pathlib import Path
 
     text = Path(path).read_text(encoding="utf-8")
     topic_match = re.search(r"^# Conversation: (.*)$", text, re.MULTILINE)
@@ -152,6 +151,6 @@ def load_transcript(path) -> Conversation:
     )
 
 def latest_transcript(directory) -> Optional[Path]:
-    """The most recently written transcript in `directory`, or None if there are none."""
-    files = sorted(Path(directory).glob("*.md"))
-    return files[-1] if files else None
+    """The most recently modified transcript in `directory`, or None if there are none."""
+    files = list(Path(directory).glob("*.md"))
+    return max(files, key=lambda p: p.stat().st_mtime) if files else None

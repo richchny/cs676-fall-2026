@@ -313,3 +313,24 @@ def test_model_is_told_which_personas_exist(tmp_path):
     Orchestrator(llm=llm, persona_dir=tmp_path).handle("have Ada talk to Elena")
 
     assert "Ada Chen" in llm.calls[0]["system"]
+
+def test_ambiguous_participant_is_reported(tmp_path):
+    for name in ["Marcus Chen", "Marcus Webb"]:
+        save_persona(PersonaSpec(name=name, role="patient", summary="", body="b"), tmp_path)
+
+    orch = Orchestrator(llm=ScriptedLLM(), persona_dir=tmp_path)
+    result = orch.handle("start a conversation between marcus and marcus about the pain")
+
+    assert "more than one" in result.reply
+    assert result.conversation is None
+
+
+def test_same_persona_twice_is_refused(tmp_path):
+    for name, role in [("Marcus Chen", "patient"), ("Dr. Reyes", "doctor")]:
+        save_persona(PersonaSpec(name=name, role=role, summary="", body="b"), tmp_path)
+
+    orch = Orchestrator(llm=ScriptedLLM(), persona_dir=tmp_path)
+    result = orch.handle("start a conversation between Marcus Chen and marcus chen about the pain")
+
+    assert "can't talk to itself" in result.reply
+    assert result.conversation is None

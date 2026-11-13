@@ -1,19 +1,13 @@
 """
-orchestrator.py — the agent you talk to.
+orchestrator.py: the agent you talk to.
 
-You type "I want to create a persona patient" and something has to decide that
-you meant `create_persona("patient")`. That decision is intent routing, and it
-happens here.
+The model decides what you meant. Each request goes to Claude along with the tool
+definitions in tools.py; Claude asks for tools to be run, and the loop in
+_handle_with_tools executes them and feeds the results back until Claude has a
+final answer.
 
-The baseline router is regular expressions. It works, it is free, it is
-deterministic, and it is obviously not what a modern agent does — a real one
-would hand Claude a set of tools and let the model choose. Replacing this router
-with genuine tool use is the headline task of this project, and the tool schemas
-you would need are sketched at the bottom of this file.
-
-Anything the router does *not* recognize is passed to the model as ordinary
-conversation, so the orchestrator still feels like something you are talking to
-rather than a command prompt.
+Models without tool support (the --offline stub) fall back to the original
+regular-expression router, which is kept so the app runs for free with no key.
 """
 
 from __future__ import annotations
@@ -29,10 +23,10 @@ from .llm import LLM
 from .persona import (
     DEFAULT_PERSONA_DIR,
     PersonaSpec,
-    find_persona,
     generate_persona,
     list_personas,
     save_persona,
+    find_personas,
 )
 
 from .tools import TOOLS, execute_tool
@@ -46,10 +40,7 @@ Be brief — two or three sentences. When the user seems ready to act, remind th
 can say things like "create a persona doctor", "list personas", or "have them talk
 about the test results"."""
 
-_TOOL_SYSTEM = """You have toolsto create personas, list them, start conversations between 
-them, and evaluate a finished conversation.
-
-You are the stage manager of a persona simulation workshop.
+_TOOL_SYSTEM = """You are the stage manager of a persona simulation workshop.
 
 The user builds fictional characters and has them talk to each other. You have tools
 to create personas, list them, and start conversations between them. Use them to do
@@ -123,10 +114,16 @@ class Orchestrator:
 
         if who:
             for name in who:
-                found = find_persona(name, self.persona_dir)
-                if found is None:
+                matches = find_personas(name, self.persona_dir)
+                if not matches:
                     return Result(reply=f"I couldn't find a persona matching '{name}'.")
-                specs.append(found)
+                if len(matches) > 1:
+                    options = ", ".join(m.name for m in matches)
+                    return Result(reply=f"'{name}' matches more than one persona: {options}. Which one do you mean?")
+                specs.append(matches[0])
+
+            if len({s.name for s in specs}) < len(specs):
+                return Result(reply="A persona can't talk to itself. Name two different personas.")
         else:
             specs = list_personas(self.persona_dir)[:2]
 
@@ -198,11 +195,8 @@ class Orchestrator:
         """
         Work out what the user meant and do it.
 
-        Models with tool support uses the tool loop, and others (offline mode) falls back to regexes
-
-        Patterns are tried in order and the first match wins, so the ordering
-        below is load-bearing — a fact that should make you suspicious of the
-        whole approach.
+        If the model supports tools, the tool loop decides. Otherwise (offline mode) a
+        stack of regular expressions is tried in order and the first match wins.
         """
 
         if hasattr(self.llm, "complete_with_tools"):
@@ -270,18 +264,18 @@ class Orchestrator:
 #     `response.stop_reason == "tool_use"`, run the requested tool, append a
 #     `tool_result` block, and send it back. The model handles "actually, make
 #     it two doctors and a nurse, and have them argue about the diagnosis" —
-#     which the regexes below will never manage.
+#     which the regexes below will never manage.  [DONE]
 #
 #  2. The router cannot ask a clarifying question. "Create a persona" with no
-#     description gets a canned string instead of "what kind of person?".
+#     description gets a canned string instead of "what kind of person?". [DONE]
 #
 #  3. Pattern order decides meaning. "list the personas then have them talk"
-#     only ever lists.
+#     only ever lists. [ONLY APPLIES TO OFFLINE]
 #
 #  4. `_converse` silently picks the first two personas when you do not name
-#     anyone, even if you have six.
+#     anyone, even if you have six. [FIXED FOR NAMED PARTICIPANTS]
 #
-#  5. `turns` is hardcoded to 6 and cannot be set from the conversation.
+#  5. `turns` is hardcoded to 6 and cannot be set from the conversation. [DONE]
 #
 #  6. `self.history` grows without limit and is only used by `_chat`, so the
 #     orchestrator has no memory of the personas it created.

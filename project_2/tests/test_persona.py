@@ -108,12 +108,6 @@ def test_code_fenced_document_still_parses():
     assert "Retired schoolteacher" in spec.body
     assert "```" not in spec.body
 
-"""
-One consequence to keep in mind: the filename and the persona’s name can now disagree. 
-maria-delgado-2.md contains name: Maria Delgado, because the name comes from the file’s frontmatter, not its filename. 
-That’s why the duplicate-name problem still needs its own fix, which is our next step. find_persona("maria-delgado-2") 
-won’t match anything, since it compares against spec.slug() (from the name), not the filename.
-"""
 
 def test_save_and_load(tmp_path):
     spec = PersonaSpec(name="Maria Delgado", role="patient", summary="s", body="# M")
@@ -122,6 +116,7 @@ def test_save_and_load(tmp_path):
     assert path.exists()
     assert path.name == "maria-delgado.md"
     assert load_persona(path).name == "Maria Delgado"
+
 
 def test_save_does_not_overwrite_existing(tmp_path):
     a = save_persona(PersonaSpec(name="Maria", role="patient", summary="", body="first"), tmp_path)
@@ -138,6 +133,7 @@ def test_save_can_overwrite_on_request(tmp_path):
 
     assert a == b
     assert "second" in a.read_text(encoding="utf-8")
+
 
 def test_list_personas_empty_dir(tmp_path):
     assert list_personas(tmp_path / "does-not-exist") == []
@@ -176,6 +172,7 @@ def test_generate_persona_survives_unstructured_output():
 
     assert spec.name != "Unnamed"
     assert spec.summary == "a nurse"
+
 
 def test_generate_persona_tells_the_model_which_names_are_taken():
     llm = ScriptedLLM(replies=[SAMPLE_MARKDOWN])
